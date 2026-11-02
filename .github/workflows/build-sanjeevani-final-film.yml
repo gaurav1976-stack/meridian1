@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-film:
@@ -101,3 +101,19 @@ jobs:
           compression-level: 0
           retention-days: 7
           if-no-files-found: error
+
+      - name: Publish verified MP4 as a release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sanjeevani-final-film-v1
+          name: Sanjeevani Vann — Final Investor Film
+          body: |
+            Verified 1080p investor film with embedded human narration and cinematic background music.
+
+            Technical verification:
+            - 1920 × 1080 H.264 picture
+            - AAC audio at 48 kHz
+            - narration and music physically embedded in the MP4
+            - duration approximately 4 minutes 41 seconds
+          files: ${{ env.OUTPUT_FILE }}
+          fail_on_unmatched_files: true
