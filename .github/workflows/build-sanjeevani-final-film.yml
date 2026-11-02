@@ -1,0 +1,103 @@
+name: Build Sanjeevani Final Film
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-sanjeevani-final-film.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-film:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VIDEO_URL: https://video.wixstatic.com/video/5319bf_f391f20c0b9b4e63b07655078dd16721/1080p/mp4/file.mp4
+      NARRATION_URL: https://headless-jvyjuorsmhu-gaurav1976-140a.wix-site-host.com/media/Sanjeevani_Vann_Investor_Narration_R03.mp3
+      MUSIC_URL: https://headless-jvyjuorsmhu-gaurav1976-140a.wix-site-host.com/media/Sanjeevani_Vann_Investor_Film_Score.mp3
+      OUTPUT_FILE: Sanjeevani_Vann_Investor_Film_FINAL_with_Narration_Music.mp4
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg jq
+
+      - name: Download approved media
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 5 --retry-delay 3 --output picture.mp4 "$VIDEO_URL"
+          curl --fail --location --retry 5 --retry-delay 3 --output narration.mp3 "$NARRATION_URL"
+          curl --fail --location --retry 5 --retry-delay 3 --output music.mp3 "$MUSIC_URL"
+          test -s picture.mp4
+          test -s narration.mp3
+          test -s music.mp3
+          ls -lh picture.mp4 narration.mp3 music.mp3
+
+      - name: Mix narration and music into the 1080p master
+        run: |
+          set -euo pipefail
+          ffmpeg -hide_banner -y \
+            -i picture.mp4 \
+            -i narration.mp3 \
+            -stream_loop -1 -i music.mp3 \
+            -filter_complex "[1:a]volume=1.0[voice];[2:a]volume=0.13,afade=t=in:st=0:d=3,afade=t=out:st=275:d=5[music];[voice][music]amix=inputs=2:duration=first:dropout_transition=3,alimiter=limit=0.95[aout]" \
+            -map 0:v:0 \
+            -map "[aout]" \
+            -c:v copy \
+            -c:a aac \
+            -b:a 192k \
+            -ar 48000 \
+            -t 280.8 \
+            -movflags +faststart \
+            -metadata title="Sanjeevani Vann — Forest Wellness & Active-Living Vision" \
+            -metadata artist="Aeronova Consultants — Architect Gaurav Vatsa" \
+            "$OUTPUT_FILE"
+
+      - name: Verify picture, audio and duration
+        run: |
+          set -euo pipefail
+          ffprobe -v error \
+            -show_entries format=duration,size,bit_rate:stream=index,codec_type,codec_name,width,height,sample_rate,channels \
+            -of json "$OUTPUT_FILE" | tee ffprobe.json
+
+          VIDEO_STREAMS=$(jq '[.streams[] | select(.codec_type == "video")] | length' ffprobe.json)
+          AUDIO_STREAMS=$(jq '[.streams[] | select(.codec_type == "audio")] | length' ffprobe.json)
+          WIDTH=$(jq -r '[.streams[] | select(.codec_type == "video")][0].width' ffprobe.json)
+          HEIGHT=$(jq -r '[.streams[] | select(.codec_type == "video")][0].height' ffprobe.json)
+          AUDIO_CODEC=$(jq -r '[.streams[] | select(.codec_type == "audio")][0].codec_name' ffprobe.json)
+          DURATION=$(jq -r '.format.duration | tonumber' ffprobe.json)
+
+          test "$VIDEO_STREAMS" -ge 1
+          test "$AUDIO_STREAMS" -ge 1
+          test "$WIDTH" -eq 1920
+          test "$HEIGHT" -eq 1080
+          test "$AUDIO_CODEC" = "aac"
+          awk -v d="$DURATION" 'BEGIN { exit !(d > 279 && d < 282) }'
+
+          ffmpeg -hide_banner -i "$OUTPUT_FILE" -map 0:a:0 -af volumedetect -f null - 2> audio-stats.txt
+          cat audio-stats.txt
+          grep -q 'max_volume:' audio-stats.txt
+          if grep -q 'max_volume: -inf' audio-stats.txt; then
+            echo 'Audio verification failed: track is silent.' >&2
+            exit 1
+          fi
+
+          ls -lh "$OUTPUT_FILE"
+
+      - name: Upload final film artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sanjeevani-Vann-Final-Film-with-Narration-and-Music
+          path: |
+            Sanjeevani_Vann_Investor_Film_FINAL_with_Narration_Music.mp4
+            ffprobe.json
+            audio-stats.txt
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
