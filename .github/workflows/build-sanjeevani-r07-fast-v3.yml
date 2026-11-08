@@ -1,0 +1,157 @@
+name: Build Sanjeevani R07 Fast V3
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-sanjeevani-r07-fast-v3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BLENDER_URL: https://download.blender.org/release/Blender4.5/blender-4.5.15-linux-x64.tar.xz
+  NARRATION_URL: https://music.wixstatic.com/mp3/5319bf_13707a374b3240f3a815d75d33914ec1.mp3
+  MUSIC_URL: https://music.wixstatic.com/mp3/5319bf_3ad2de4d97af404eaba817c4b8a2ccd4.mp3
+  RELEASE_TAG: sanjeevani-r07-lod300
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Blender, FFmpeg and Python libraries
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl xz-utils zip jq ffmpeg fonts-dejavu-core libx11-6 libxi6 libxrender1 libgl1 libegl1 libxcb1 libxfixes3 libxkbcommon0 libsm6 libice6 libxxf86vm1 libxext6 libxinerama1 libxcursor1
+          python3 -m pip install --upgrade pip
+          python3 -m pip install matplotlib requests pillow numpy
+          mkdir -p tools/blender build/site_photos build/renders build/film
+          curl -fL --retry 6 -o tools/blender.tar.xz "$BLENDER_URL"
+          tar -xJf tools/blender.tar.xz -C tools/blender --strip-components=1
+
+      - name: Fetch project media
+        run: |
+          set -euo pipefail
+          curl -fL --retry 5 -o build/site_photos/actual_site_5.png "https://static.wixstatic.com/media/5319bf_374688c0661340c8b79150c61e0f6017~mv2.png"
+          curl -fL --retry 5 -o build/site_photos/actual_site_6.png "https://static.wixstatic.com/media/5319bf_4a8b6d096fd54317add33b25810fde49~mv2.png"
+          curl -fL --retry 5 -o build/site_photos/actual_site_7.png "https://static.wixstatic.com/media/5319bf_d95a1d8f46764f9fa6d262be2fa043b9~mv2.png"
+          curl -fL --retry 5 -o build/site_photos/actual_site_8.png "https://static.wixstatic.com/media/5319bf_47774cd7fe444499acc10acc28c8b30a~mv2.png"
+          curl -fL --retry 5 -o build/site_photos/actual_site_9.png "https://static.wixstatic.com/media/5319bf_c479643b14214144a90214b56dedbeed~mv2.png"
+          curl -fL --retry 8 --retry-delay 3 -o build/narration.mp3 "$NARRATION_URL"
+          curl -fL --retry 6 -o build/music.mp3 "$MUSIC_URL"
+          test -s build/narration.mp3
+          test -s build/music.mp3
+
+      - name: Make Blender 4.5-compatible production script
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('sanjeevani_r07/blender_build.py')
+          t=p.read_text(encoding='utf-8')
+          t=t.replace("    pts = [(cx + math.cos(a)*radius, cy + math.sin(a)*radius) for a in np_angles := [2*math.pi*i/64 for i in range(64)]]","    angles = [2*math.pi*i/64 for i in range(64)]\n    pts = [(cx + math.cos(a)*radius, cy + math.sin(a)*radius) for a in angles]")
+          pattern=r"def create_polygon\(name: str, pts2d, z=0\.0, material=None, col=None\):.*?\n\ndef add_box"
+          replacement='''def create_polygon(name: str, pts2d, z=0.0, material=None, col=None):
+              verts = [(float(x), float(y), float(z)) for x, y in pts2d]
+              faces = [tuple(range(len(verts)))]
+              return create_mesh(name, verts, faces, material, col)
+
+          def add_box'''
+          t,n=re.subn(pattern,replacement,t,flags=re.S)
+          if n!=1: raise SystemExit(f'create_polygon replacement count {n}')
+          t=t.replace('scene.render.resolution_x = 1920','scene.render.resolution_x = 1280')
+          t=t.replace('scene.render.resolution_y = 1080','scene.render.resolution_y = 720')
+          t=t.replace('scene.eevee.taa_render_samples = 64','scene.eevee.taa_render_samples = 16')
+          p.write_text(t,encoding='utf-8')
+          PY
+          python3 -m py_compile sanjeevani_r07/blender_build.py sanjeevani_r07/climate_analysis.py sanjeevani_r07/build_film.py
+
+      - name: Produce regional climate analysis
+        env:
+          SV_OUTPUT: ${{ github.workspace }}/build
+        run: |
+          python3 sanjeevani_r07/climate_analysis.py | tee build/climate.log
+          test -s build/Sanjeevani_Vann_Regional_Climate_Analysis_R07.pdf
+
+      - name: Build LOD300-equivalent model and 16 architectural views
+        env:
+          SV_OUTPUT: ${{ github.workspace }}/build
+          BLENDER_USER_CONFIG: ${{ github.workspace }}/.blender-config
+        run: |
+          set -euo pipefail
+          tools/blender/blender -b --factory-startup --python sanjeevani_r07/blender_build.py 2>&1 | tee build/blender.log
+          test ${PIPESTATUS[0]} -eq 0
+          test -s build/Sanjeevani_Vann_LOD300_R07.blend
+          test -s build/Sanjeevani_Vann_LOD300_R07.glb
+          test "$(find build/renders -name '*.png' | wc -l)" -ge 16
+
+      - name: Create render register
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image,ImageDraw,ImageFont
+          files=sorted(Path('build/renders').glob('*.png')); tw,th,cols=480,270,4; rows=(len(files)+3)//4
+          sheet=Image.new('RGB',(cols*tw,rows*(th+42)),'#071b15'); draw=ImageDraw.Draw(sheet); font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',16)
+          for i,p in enumerate(files):
+              im=Image.open(p).convert('RGB'); im.thumbnail((tw,th),Image.Resampling.LANCZOS); x=(i%cols)*tw; y=(i//cols)*(th+42)
+              sheet.paste(im,(x+(tw-im.width)//2,y+(th-im.height)//2)); draw.text((x+10,y+th+10),p.stem.replace('_',' '),fill='#f2e9d0',font=font)
+          sheet.save('build/Sanjeevani_Vann_R07_Render_Contact_Sheet.jpg',quality=92)
+          PY
+
+      - name: Assemble five-minute narrated film
+        env:
+          SV_OUTPUT: ${{ github.workspace }}/build
+          SV_NARRATION: ${{ github.workspace }}/build/narration.mp3
+          SV_MUSIC: ${{ github.workspace }}/build/music.mp3
+        run: |
+          set -euo pipefail
+          python3 sanjeevani_r07/build_film.py 2>&1 | tee build/film.log
+          test -s build/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4
+          test -s build/Sanjeevani_Vann_R07_5min_Architectural_Film_Web_720p.mp4
+
+      - name: Verify and package all deliverables
+        run: |
+          set -euo pipefail
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_type,codec_name,width,height,sample_rate,channels -of json build/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4 > build/final_verification.json
+          D=$(jq -r '.format.duration|tonumber' build/final_verification.json); awk -v d="$D" 'BEGIN{exit !(d>299&&d<301)}'
+          test "$(jq '[.streams[]|select(.codec_type=="audio")]|length' build/final_verification.json)" -ge 1
+          ffmpeg -hide_banner -i build/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4 -map 0:a:0 -af volumedetect -f null - 2> build/audio_verification.txt
+          ! grep -q 'max_volume: -inf' build/audio_verification.txt
+          (cd build && zip -r -9 Sanjeevani_Vann_R07_Renders.zip renders >/dev/null)
+          (cd build && zip -9 Sanjeevani_Vann_R07_LOD300_Model_Package.zip Sanjeevani_Vann_LOD300_R07.blend Sanjeevani_Vann_LOD300_R07.glb model_statistics.json blender.log >/dev/null)
+          (cd build && zip -9 Sanjeevani_Vann_R07_Climate_Analysis_Package.zip Sanjeevani_Vann_Regional_Climate_Analysis_R07.pdf climate_*.png climate_summary.json climate.log >/dev/null)
+          cat > build/README_R07.txt <<'EOF'
+          Sanjeevani Vann R07 — LOD300-equivalent coordinated concept model, roads, dual walks, landscape, villas, wellness buildings, Van Nivas, clubhouse, waterfront terraces, sports, farms, climate analysis, 16 renders and five-minute film. Not a surveyed or construction model. Designed by Aeronova Consultants, led by Architect Gaurav Vatsa.
+          EOF
+          (cd build && zip -r -9 Sanjeevani_Vann_R07_Complete_Package.zip README_R07.txt Sanjeevani_Vann_LOD300_R07.blend Sanjeevani_Vann_LOD300_R07.glb model_statistics.json Sanjeevani_Vann_R07_Render_Contact_Sheet.jpg Sanjeevani_Vann_R07_Renders.zip Sanjeevani_Vann_Regional_Climate_Analysis_R07.pdf Sanjeevani_Vann_R07_Climate_Analysis_Package.zip Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4 Sanjeevani_Vann_R07_5min_Architectural_Film_Web_720p.mp4 film_probe.json final_verification.json >/dev/null)
+          sha256sum build/Sanjeevani_Vann_LOD300_R07.blend build/Sanjeevani_Vann_LOD300_R07.glb build/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4 > build/SHA256SUMS.txt
+
+      - name: Publish permanent R07 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 && gh release delete "$RELEASE_TAG" --cleanup-tag -y || true
+          gh release create "$RELEASE_TAG" --title "Sanjeevani Vann — LOD300 Concept R07" --notes "LOD300-equivalent model, coordinated roads and walks, detailed architecture, climate analysis, render set and verified five-minute film. Designed by Aeronova Consultants, led by Architect Gaurav Vatsa." build/Sanjeevani_Vann_LOD300_R07.blend build/Sanjeevani_Vann_LOD300_R07.glb build/Sanjeevani_Vann_R07_LOD300_Model_Package.zip build/Sanjeevani_Vann_R07_Renders.zip build/Sanjeevani_Vann_R07_Render_Contact_Sheet.jpg build/Sanjeevani_Vann_Regional_Climate_Analysis_R07.pdf build/Sanjeevani_Vann_R07_Climate_Analysis_Package.zip build/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4 build/Sanjeevani_Vann_R07_5min_Architectural_Film_Web_720p.mp4 build/Sanjeevani_Vann_R07_Complete_Package.zip build/model_statistics.json build/climate_summary.json build/film_probe.json build/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sanjeevani-Vann-R07-Final-Package
+          path: |
+            build/*.blend
+            build/*.glb
+            build/*.zip
+            build/*.jpg
+            build/*.pdf
+            build/*.mp4
+            build/*.json
+            build/*.txt
+            build/renders/*.png
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
