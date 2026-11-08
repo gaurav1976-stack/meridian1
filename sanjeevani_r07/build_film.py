@@ -82,7 +82,7 @@ def scene_segment(image: Path, output: Path, caption: str, index: int, duration:
         "crop=3840:2160,"
         f"zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={W}x{H}:fps={FPS},"
         "format=yuv420p,"
-        f"drawbox=x=0:y=h-164:w=w:h=164:color=0x061913@0.73:t=fill,"
+        f"drawbox=x=0:y=ih-164:w=iw:h=164:color=0x061913@0.73:t=fill,"
         f"drawtext=fontfile={FONT_BOLD}:text='{caption}':x=72:y=h-108:fontsize=38:fontcolor=white:"
         "shadowx=2:shadowy=2:shadowcolor=black@0.45,"
         f"fade=t=in:st=0:d=0.65,fade=t=out:st={duration-0.7:.2f}:d=0.7"
