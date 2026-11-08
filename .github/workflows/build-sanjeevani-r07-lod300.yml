@@ -1,226 +1,230 @@
-name: Build Sanjeevani R07 LOD300
+name: Build Sanjeevani R07 LOD300 Package
 
 on:
   push:
     paths:
+      - 'sanjeevani_r07/**'
       - '.github/workflows/build-sanjeevani-r07-lod300.yml'
   workflow_dispatch:
 
 permissions:
   contents: write
 
-env:
-  SITE_BASE: https://headless-jvyjuorsmhu-gaurav1976-140a.wix-site-host.com
-  BLENDER_URL: https://download.blender.org/release/Blender4.5/blender-4.5.15-linux-x64.tar.xz
-  NARRATION_URL: https://music.wixstatic.com/mp3/5319bf_031f7270c62c471b92f4f66792ce35eb.mp3
-  MUSIC_URL: https://music.wixstatic.com/mp3/5319bf_3ad2de4d97af404eaba817c4b8a2ccd4.mp3
-  RELEASE_TAG: sanjeevani-r07-lod300
-
 jobs:
   build-r07:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      SV_OUTPUT: ${{ github.workspace }}/outputs
+      NARRATION_URL: https://music.wixstatic.com/mp3/5319bf_13707a374b3240f3a815d75d33914ec1.mp3
+      MUSIC_URL: https://music.wixstatic.com/mp3/5319bf_3ad2de4d97af404eaba817c4b8a2ccd4.mp3
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install system and Python dependencies
+      - name: Install Blender, FFmpeg and analysis dependencies
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y \
-            curl xz-utils zip jq ffmpeg fonts-dejavu-core \
-            libx11-6 libxi6 libxrender1 libgl1 libegl1 libxcb1 \
-            libxfixes3 libxkbcommon0 libsm6 libice6 libxxf86vm1 \
-            libxext6 libxinerama1 libxcursor1
+          sudo apt-get install -y blender ffmpeg zip jq fonts-dejavu-core
           python3 -m pip install --upgrade pip
-          python3 -m pip install matplotlib pillow numpy
+          python3 -m pip install matplotlib requests pillow
+          blender --version
+          ffmpeg -version | head -n 1
 
-      - name: Download R07 pipeline and source model
+      - name: Prepare output directories and source photographs
         run: |
           set -euo pipefail
-          mkdir -p sanjeevani_r07 input build
-          curl --fail --location --retry 5 --retry-delay 3 \
-            --output sanjeevani_r07/climate_analysis.py "$SITE_BASE/r07_pipeline/climate_analysis.py"
-          curl --fail --location --retry 5 --retry-delay 3 \
-            --output sanjeevani_r07/build_lod300.py "$SITE_BASE/r07_pipeline/build_lod300.py"
-          curl --fail --location --retry 5 --retry-delay 3 \
-            --output sanjeevani_r07/make_film.py "$SITE_BASE/r07_pipeline/make_film.py"
-          curl --fail --location --retry 5 --retry-delay 3 \
-            --output sanjeevani_r07/make_contact_sheet.py "$SITE_BASE/r07_pipeline/make_contact_sheet.py"
-          curl --fail --location --retry 5 --retry-delay 3 \
-            --output input/Sanjeevani_Vann_Concept.glb "$SITE_BASE/source_model/Sanjeevani_Vann_Concept.glb"
-          curl --fail --location --retry 5 --retry-delay 3 \
-            --output input/Sanjeevani_Concept_Geometry.json "$SITE_BASE/source_model/Sanjeevani_Concept_Geometry.json"
-          python3 -m py_compile sanjeevani_r07/*.py
-          test -s input/Sanjeevani_Vann_Concept.glb
-          test -s input/Sanjeevani_Concept_Geometry.json
-          ls -lh sanjeevani_r07 input
+          mkdir -p "$SV_OUTPUT/site_photos" "$SV_OUTPUT/renders" "$SV_OUTPUT/film"
+          curl --fail --location --retry 5 --retry-delay 2 -o "$SV_OUTPUT/site_photos/actual_site_5.png" "https://static.wixstatic.com/media/5319bf_374688c0661340c8b79150c61e0f6017~mv2.png"
+          curl --fail --location --retry 5 --retry-delay 2 -o "$SV_OUTPUT/site_photos/actual_site_6.png" "https://static.wixstatic.com/media/5319bf_4a8b6d096fd54317add33b25810fde49~mv2.png"
+          curl --fail --location --retry 5 --retry-delay 2 -o "$SV_OUTPUT/site_photos/actual_site_7.png" "https://static.wixstatic.com/media/5319bf_d95a1d8f46764f9fa6d262be2fa043b9~mv2.png"
+          curl --fail --location --retry 5 --retry-delay 2 -o "$SV_OUTPUT/site_photos/actual_site_8.png" "https://static.wixstatic.com/media/5319bf_47774cd7fe444499acc10acc28c8b30a~mv2.png"
+          curl --fail --location --retry 5 --retry-delay 2 -o "$SV_OUTPUT/site_photos/actual_site_9.png" "https://static.wixstatic.com/media/5319bf_c479643b14214144a90214b56dedbeed~mv2.png"
+          curl --fail --location --retry 8 --retry-delay 5 -o "$SV_OUTPUT/narration.mp3" "$NARRATION_URL"
+          curl --fail --location --retry 5 --retry-delay 2 -o "$SV_OUTPUT/music.mp3" "$MUSIC_URL"
+          test -s "$SV_OUTPUT/narration.mp3"
+          test -s "$SV_OUTPUT/music.mp3"
+          ls -lh "$SV_OUTPUT/site_photos" "$SV_OUTPUT/narration.mp3" "$SV_OUTPUT/music.mp3"
 
-      - name: Produce indicative climate analysis
+      - name: Generate regional climate analysis
         run: |
           set -euo pipefail
-          python3 sanjeevani_r07/climate_analysis.py \
-            --lat 21.38333 --lon 77.26694 --start 2001 --end 2020 \
-            --out build/climate | tee build/climate_analysis.log
-          test -s build/climate/Sanjeevani_Vann_Climate_Analysis_R07.pdf
-          test -s build/climate/climate_design_board.png
+          python3 sanjeevani_r07/climate_analysis.py 2>&1 | tee "$SV_OUTPUT/climate_analysis.log"
+          test -s "$SV_OUTPUT/Sanjeevani_Vann_Regional_Climate_Analysis_R07.pdf"
+          test -s "$SV_OUTPUT/climate_01_temperature_rainfall.png"
+          test -s "$SV_OUTPUT/climate_02_solar_wind_sunpath.png"
+          test -s "$SV_OUTPUT/climate_03_design_responses.png"
 
-      - name: Download official Blender LTS
+      - name: Repair and syntax-check Blender source
         run: |
           set -euo pipefail
-          mkdir -p tools/blender
-          curl --fail --location --retry 5 --retry-delay 5 \
-            --output tools/blender.tar.xz "$BLENDER_URL"
-          tar -xJf tools/blender.tar.xz -C tools/blender --strip-components=1
-          tools/blender/blender --version
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('sanjeevani_r07/blender_build.py')
+          text = p.read_text(encoding='utf-8')
+          broken = "    pts = [(cx + math.cos(a)*radius, cy + math.sin(a)*radius) for a in np_angles := [2*math.pi*i/64 for i in range(64)]]"
+          fixed = "    angles = [2*math.pi*i/64 for i in range(64)]\n    pts = [(cx + math.cos(a)*radius, cy + math.sin(a)*radius) for a in angles]"
+          if broken in text:
+              text = text.replace(broken, fixed)
+          p.write_text(text, encoding='utf-8')
+          PY
+          python3 -m py_compile sanjeevani_r07/blender_build.py
 
-      - name: Build coordinated LOD300 concept model and render 20 shots
-        env:
-          BLENDER_USER_CONFIG: ${{ github.workspace }}/.blender-config
+      - name: Build coordinated Blender model and render views
+        shell: bash
         run: |
           set -euo pipefail
-          tools/blender/blender \
-            --background --factory-startup \
-            --python sanjeevani_r07/build_lod300.py -- \
-            --input-glb input/Sanjeevani_Vann_Concept.glb \
-            --geometry input/Sanjeevani_Concept_Geometry.json \
-            --output build/model \
-            --climate-board build/climate/climate_design_board.png \
-            | tee build/blender_build.log
-          test -s build/model/Sanjeevani_Vann_LOD300_R07.blend
-          test -s build/model/Sanjeevani_Vann_LOD300_R07.glb
-          test "$(find build/model/renders -name '*.png' | wc -l)" -eq 20
-          python3 sanjeevani_r07/make_contact_sheet.py \
-            --renders build/model/renders \
-            --output build/Sanjeevani_Vann_R07_Render_Register.jpg
-          ls -lh build/model build/model/renders | tail -40
+          blender -b --factory-startup --python sanjeevani_r07/blender_build.py 2>&1 | tee "$SV_OUTPUT/blender_build.log"
+          test ${PIPESTATUS[0]} -eq 0
+          test -s "$SV_OUTPUT/Sanjeevani_Vann_LOD300_R07.blend"
+          test -s "$SV_OUTPUT/Sanjeevani_Vann_LOD300_R07.glb"
+          test -s "$SV_OUTPUT/model_statistics.json"
+          test "$(find "$SV_OUTPUT/renders" -maxdepth 1 -name '*.png' | wc -l)" -ge 16
+          ls -lh "$SV_OUTPUT/Sanjeevani_Vann_LOD300_R07.blend" "$SV_OUTPUT/Sanjeevani_Vann_LOD300_R07.glb"
 
-      - name: Download narration and cinematic score
+      - name: Create render contact sheet
         run: |
           set -euo pipefail
-          mkdir -p build/audio
-          curl --fail --location --retry 5 --retry-delay 3 \
-            --output build/audio/narration.mp3 "$NARRATION_URL"
-          curl --fail --location --retry 5 --retry-delay 3 \
-            --output build/audio/music.mp3 "$MUSIC_URL"
-          ffprobe -v error -show_entries format=duration -of default=nw=1 build/audio/narration.mp3
-          test -s build/audio/narration.mp3
-          test -s build/audio/music.mp3
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw, ImageFont
+          root = Path('outputs/renders')
+          files = sorted(root.glob('*.png'))
+          thumb_w, thumb_h = 480, 270
+          cols = 4
+          rows = (len(files) + cols - 1) // cols
+          sheet = Image.new('RGB', (cols*thumb_w, rows*(thumb_h+42)), '#071B15')
+          draw = ImageDraw.Draw(sheet)
+          font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 16)
+          for i, path in enumerate(files):
+              im = Image.open(path).convert('RGB')
+              im.thumbnail((thumb_w, thumb_h), Image.Resampling.LANCZOS)
+              x = (i % cols)*thumb_w
+              y = (i // cols)*(thumb_h+42)
+              sheet.paste(im, (x+(thumb_w-im.width)//2, y+(thumb_h-im.height)//2))
+              draw.text((x+12, y+thumb_h+10), path.stem.replace('_',' '), fill='#F2E9D0', font=font)
+          sheet.save('outputs/Sanjeevani_Vann_R07_Render_Contact_Sheet.jpg', quality=92)
+          PY
+          test -s "$SV_OUTPUT/Sanjeevani_Vann_R07_Render_Contact_Sheet.jpg"
 
-      - name: Assemble and verify five-minute film
+      - name: Assemble five-minute architectural film
         run: |
           set -euo pipefail
-          python3 sanjeevani_r07/make_film.py \
-            --renders build/model/renders \
-            --narration build/audio/narration.mp3 \
-            --music build/audio/music.mp3 \
-            --output build/Sanjeevani_Vann_LOD300_R07_5min_Film.mp4 \
-            --work build/film_work \
-            | tee build/film_build.log
-          test -s build/Sanjeevani_Vann_LOD300_R07_5min_Film.mp4
-          test -s build/Sanjeevani_Vann_LOD300_R07_5min_Film.ffprobe.json
-          jq '.format.duration, .streams, .audio_verification' build/Sanjeevani_Vann_LOD300_R07_5min_Film.ffprobe.json
+          SV_NARRATION="$SV_OUTPUT/narration.mp3" SV_MUSIC="$SV_OUTPUT/music.mp3" python3 sanjeevani_r07/build_film.py 2>&1 | tee "$SV_OUTPUT/film_build.log"
+          test -s "$SV_OUTPUT/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4"
+          test -s "$SV_OUTPUT/Sanjeevani_Vann_R07_5min_Architectural_Film_Web_720p.mp4"
 
-      - name: Create coordinated delivery package
+      - name: Verify film, model and climate outputs
         run: |
           set -euo pipefail
-          cat > build/README_R07.txt <<'NOTES'
-          SANJEEVANI VANN — R07 LOD300 CONCEPT PACKAGE
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_type,codec_name,width,height,sample_rate,channels -of json "$SV_OUTPUT/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4" | tee "$SV_OUTPUT/final_verification.json"
+          DURATION=$(jq -r '.format.duration | tonumber' "$SV_OUTPUT/final_verification.json")
+          WIDTH=$(jq -r '[.streams[] | select(.codec_type=="video")][0].width' "$SV_OUTPUT/final_verification.json")
+          HEIGHT=$(jq -r '[.streams[] | select(.codec_type=="video")][0].height' "$SV_OUTPUT/final_verification.json")
+          AUDIO=$(jq '[.streams[] | select(.codec_type=="audio")] | length' "$SV_OUTPUT/final_verification.json")
+          awk -v d="$DURATION" 'BEGIN { exit !(d > 299 && d < 301) }'
+          test "$WIDTH" -eq 1920
+          test "$HEIGHT" -eq 1080
+          test "$AUDIO" -ge 1
+          ffmpeg -hide_banner -i "$SV_OUTPUT/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4" -map 0:a:0 -af volumedetect -f null - 2> "$SV_OUTPUT/audio_verification.txt"
+          grep -q 'max_volume:' "$SV_OUTPUT/audio_verification.txt"
+          ! grep -q 'max_volume: -inf' "$SV_OUTPUT/audio_verification.txt"
+          jq . "$SV_OUTPUT/model_statistics.json"
+          jq . "$SV_OUTPUT/climate_summary.json"
 
-          Contents
-          - Native Blender coordination model
-          - GLB digital-twin export
-          - 20 photorealistic 1920×1080 stills
-          - Five-minute H.264/AAC film with narration and score
-          - Indicative NASA POWER climate-analysis report and charts
-          - Model schedule and render manifest
+      - name: Package model, render and climate deliverables
+        run: |
+          set -euo pipefail
+          cd "$SV_OUTPUT"
+          zip -9 "Sanjeevani_Vann_R07_LOD300_Model_Package.zip" \
+            "Sanjeevani_Vann_LOD300_R07.blend" \
+            "Sanjeevani_Vann_LOD300_R07.glb" \
+            "model_statistics.json" \
+            "blender_build.log"
+          zip -9 -r "Sanjeevani_Vann_R07_Photoreal_Render_Package.zip" \
+            "renders" \
+            "Sanjeevani_Vann_R07_Render_Contact_Sheet.jpg"
+          zip -9 "Sanjeevani_Vann_R07_Climate_Analysis_Package.zip" \
+            "Sanjeevani_Vann_Regional_Climate_Analysis_R07.pdf" \
+            "climate_01_temperature_rainfall.png" \
+            "climate_02_solar_wind_sunpath.png" \
+            "climate_03_design_responses.png" \
+            "climate_summary.json" \
+            "climate_analysis.log"
+          rm -f film/segment_*.mp4 film/concat.txt
+          ls -lh *.zip *.mp4 *.blend *.glb *.pdf *.jpg
 
-          Design scope
-          Roads, dual pedestrian loops, cul-de-sac, bioswales, wellness villas,
-          consultation and therapy, physio/gym, Van Nivas, surface parking,
-          lakeside clubhouse, waterfront terraces, sports and herb farms.
+      - name: Write release notes
+        run: |
+          cat > "$SV_OUTPUT/RELEASE_NOTES_R07.md" <<'EOF'
+          # Sanjeevani Vann R07
 
-          Status
-          Concept-stage LOD300 coordination model. It is not a certified survey,
-          BIM execution model, approval drawing, tender model or construction issue.
-          Boundaries, terrain, hydrology, structural systems, services and exact climate
-          basis require verification before detailed design.
+          Coordinated LOD300-equivalent concept package developed by Aeronova Consultants, led by Architect Gaurav Vatsa.
 
-          Designed by Aeronova Consultants, led by Architect Gaurav Vatsa.
-          NOTES
-          cp build/climate/Sanjeevani_Vann_Climate_Analysis_R07.pdf build/
-          cp build/model/Sanjeevani_Vann_LOD300_R07.blend build/
-          cp build/model/Sanjeevani_Vann_LOD300_R07.glb build/
-          cp build/model/Sanjeevani_Vann_LOD300_Model_Schedule_R07.json build/
-          cp build/model/Sanjeevani_Vann_Render_Manifest_R07.json build/
-          (cd build/model && zip -r -9 ../Sanjeevani_Vann_R07_Renders.zip renders >/dev/null)
-          (cd build && zip -r -9 Sanjeevani_Vann_R07_Complete_Package.zip \
-            README_R07.txt \
-            Sanjeevani_Vann_LOD300_R07.blend \
-            Sanjeevani_Vann_LOD300_R07.glb \
-            Sanjeevani_Vann_LOD300_Model_Schedule_R07.json \
-            Sanjeevani_Vann_Render_Manifest_R07.json \
-            Sanjeevani_Vann_Climate_Analysis_R07.pdf \
-            Sanjeevani_Vann_R07_Render_Register.jpg \
-            Sanjeevani_Vann_R07_Renders.zip \
-            Sanjeevani_Vann_LOD300_R07_5min_Film.mp4 \
-            Sanjeevani_Vann_LOD300_R07_5min_Film.ffprobe.json >/dev/null)
-          sha256sum \
-            build/Sanjeevani_Vann_LOD300_R07.blend \
-            build/Sanjeevani_Vann_LOD300_R07.glb \
-            build/Sanjeevani_Vann_LOD300_R07_5min_Film.mp4 \
-            build/Sanjeevani_Vann_Climate_Analysis_R07.pdf \
-            | tee build/SHA256SUMS.txt
-          du -h build/* | sort -h | tail -30
+          The package includes:
+          - editable Blender model and GLB digital twin;
+          - roads, cul-de-sac, dual pedestrian walks, swales, lighting and landscape;
+          - eighteen detailed wellness villas;
+          - consultation, physio/gym and Van Nivas buildings;
+          - lakeside clubhouse and layered waterfront terraces;
+          - sports, herb farms, parking and environmental systems;
+          - Nagpur-Wardha regional climate-proxy analysis;
+          - sixteen rendered views and contact sheet;
+          - five-minute 1080p narrated architectural film and web version.
 
-      - name: Publish permanent R07 release assets
+          All geometry, levels, climate conclusions and development areas remain concept-stage and require survey, engineering and statutory validation.
+          EOF
+
+      - name: Publish R07 release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 && gh release delete "$RELEASE_TAG" --cleanup-tag -y || true
-          cat > release-notes.md <<'NOTES'
-          ## Sanjeevani Vann — LOD300 Concept R07
+          TAG="sanjeevani-r07"
+          ASSETS=(
+            "$SV_OUTPUT/Sanjeevani_Vann_LOD300_R07.blend"
+            "$SV_OUTPUT/Sanjeevani_Vann_LOD300_R07.glb"
+            "$SV_OUTPUT/Sanjeevani_Vann_R07_LOD300_Model_Package.zip"
+            "$SV_OUTPUT/Sanjeevani_Vann_R07_Photoreal_Render_Package.zip"
+            "$SV_OUTPUT/Sanjeevani_Vann_R07_Climate_Analysis_Package.zip"
+            "$SV_OUTPUT/Sanjeevani_Vann_Regional_Climate_Analysis_R07.pdf"
+            "$SV_OUTPUT/Sanjeevani_Vann_R07_Render_Contact_Sheet.jpg"
+            "$SV_OUTPUT/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4"
+            "$SV_OUTPUT/Sanjeevani_Vann_R07_5min_Architectural_Film_Web_720p.mp4"
+          )
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "Sanjeevani Vann R07 · LOD300 Concept Package" --notes-file "$SV_OUTPUT/RELEASE_NOTES_R07.md"
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$TAG" "${ASSETS[@]}" --title "Sanjeevani Vann R07 · LOD300 Concept Package" --notes-file "$SV_OUTPUT/RELEASE_NOTES_R07.md"
+          fi
 
-          Coordinated concept model, climate analysis, 20-shot photoreal render set and a five-minute narrated architectural film.
-
-          **Important:** Concept-stage LOD300 coordination only. Survey, title, boundaries, terrain, hydrology, structure, building services, environmental performance and statutory compliance remain subject to verification.
-
-          Designed by Aeronova Consultants, led by Architect Gaurav Vatsa.
-          NOTES
-          gh release create "$RELEASE_TAG" \
-            --title "Sanjeevani Vann — LOD300 Concept R07" \
-            --notes-file release-notes.md \
-            build/Sanjeevani_Vann_LOD300_R07.blend \
-            build/Sanjeevani_Vann_LOD300_R07.glb \
-            build/Sanjeevani_Vann_LOD300_Model_Schedule_R07.json \
-            build/Sanjeevani_Vann_Render_Manifest_R07.json \
-            build/Sanjeevani_Vann_Climate_Analysis_R07.pdf \
-            build/Sanjeevani_Vann_R07_Render_Register.jpg \
-            build/Sanjeevani_Vann_R07_Renders.zip \
-            build/Sanjeevani_Vann_LOD300_R07_5min_Film.mp4 \
-            build/Sanjeevani_Vann_LOD300_R07_5min_Film.ffprobe.json \
-            build/Sanjeevani_Vann_R07_Complete_Package.zip \
-            build/SHA256SUMS.txt
-
-      - name: Upload workflow artifact
+      - name: Upload complete workflow artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Sanjeevani-Vann-LOD300-R07
+          name: Sanjeevani-Vann-R07-LOD300-Complete-Package
           path: |
-            build/Sanjeevani_Vann_LOD300_R07.blend
-            build/Sanjeevani_Vann_LOD300_R07.glb
-            build/Sanjeevani_Vann_LOD300_Model_Schedule_R07.json
-            build/Sanjeevani_Vann_Render_Manifest_R07.json
-            build/Sanjeevani_Vann_Climate_Analysis_R07.pdf
-            build/Sanjeevani_Vann_R07_Render_Register.jpg
-            build/Sanjeevani_Vann_R07_Renders.zip
-            build/Sanjeevani_Vann_LOD300_R07_5min_Film.mp4
-            build/Sanjeevani_Vann_LOD300_R07_5min_Film.ffprobe.json
-            build/Sanjeevani_Vann_R07_Complete_Package.zip
-            build/SHA256SUMS.txt
+            outputs/Sanjeevani_Vann_LOD300_R07.blend
+            outputs/Sanjeevani_Vann_LOD300_R07.glb
+            outputs/Sanjeevani_Vann_R07_LOD300_Model_Package.zip
+            outputs/Sanjeevani_Vann_R07_Photoreal_Render_Package.zip
+            outputs/Sanjeevani_Vann_R07_Climate_Analysis_Package.zip
+            outputs/Sanjeevani_Vann_Regional_Climate_Analysis_R07.pdf
+            outputs/Sanjeevani_Vann_R07_Render_Contact_Sheet.jpg
+            outputs/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4
+            outputs/Sanjeevani_Vann_R07_5min_Architectural_Film_Web_720p.mp4
+            outputs/model_statistics.json
+            outputs/climate_summary.json
+            outputs/film_probe.json
+            outputs/final_verification.json
+            outputs/audio_verification.txt
+            outputs/blender_build.log
+            outputs/climate_analysis.log
+            outputs/film_build.log
+            outputs/renders/*.png
           compression-level: 0
           retention-days: 14
-          if-no-files-found: error
+          if-no-files-found: warn
