@@ -1,0 +1,95 @@
+name: Build Sanjeevani R07 Ultra
+on:
+  push:
+    paths: ['.github/workflows/build-sanjeevani-r07-ultra.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  BLENDER_URL: https://download.blender.org/release/Blender4.5/blender-4.5.15-linux-x64.tar.xz
+  NARRATION_URL: https://music.wixstatic.com/mp3/5319bf_13707a374b3240f3a815d75d33914ec1.mp3
+  MUSIC_URL: https://music.wixstatic.com/mp3/5319bf_3ad2de4d97af404eaba817c4b8a2ccd4.mp3
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl xz-utils zip jq ffmpeg fonts-dejavu-core libx11-6 libxi6 libxrender1 libgl1 libegl1 libxcb1 libxfixes3 libxkbcommon0 libsm6 libice6 libxxf86vm1 libxext6 libxinerama1 libxcursor1
+          python3 -m pip install -q matplotlib requests pillow numpy
+          mkdir -p tools/blender build/site_photos build/renders build/film
+          curl -fL -o tools/b.tar.xz "$BLENDER_URL"
+          tar -xJf tools/b.tar.xz -C tools/blender --strip-components=1
+      - name: Prepare inputs and optimise renderer
+        run: |
+          set -e
+          for pair in \
+          "actual_site_5.png https://static.wixstatic.com/media/5319bf_374688c0661340c8b79150c61e0f6017~mv2.png" \
+          "actual_site_6.png https://static.wixstatic.com/media/5319bf_4a8b6d096fd54317add33b25810fde49~mv2.png" \
+          "actual_site_7.png https://static.wixstatic.com/media/5319bf_d95a1d8f46764f9fa6d262be2fa043b9~mv2.png" \
+          "actual_site_8.png https://static.wixstatic.com/media/5319bf_47774cd7fe444499acc10acc28c8b30a~mv2.png" \
+          "actual_site_9.png https://static.wixstatic.com/media/5319bf_c479643b14214144a90214b56dedbeed~mv2.png"; do set -- $pair; curl -fL --retry 5 -o build/site_photos/$1 $2; done
+          curl -fL --retry 8 -o build/narration.mp3 "$NARRATION_URL"
+          curl -fL --retry 6 -o build/music.mp3 "$MUSIC_URL"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('sanjeevani_r07/blender_build.py'); t=p.read_text()
+          t=t.replace("    pts = [(cx + math.cos(a)*radius, cy + math.sin(a)*radius) for a in np_angles := [2*math.pi*i/64 for i in range(64)]]","    angles = [2*math.pi*i/64 for i in range(64)]\n    pts = [(cx + math.cos(a)*radius, cy + math.sin(a)*radius) for a in angles]")
+          pattern=r"def create_polygon\(name: str, pts2d, z=0\.0, material=None, col=None\):.*?\n\ndef add_box"
+          replacement='''def create_polygon(name: str, pts2d, z=0.0, material=None, col=None):
+              verts=[(float(x),float(y),float(z)) for x,y in pts2d]
+              return create_mesh(name,verts,[tuple(range(len(verts)))],material,col)
+
+          def add_box'''
+          t,n=re.subn(pattern,replacement,t,flags=re.S); assert n==1
+          t=t.replace('scene.render.resolution_x = 1920','scene.render.resolution_x = 960').replace('scene.render.resolution_y = 1080','scene.render.resolution_y = 540').replace('scene.eevee.taa_render_samples = 64','scene.eevee.taa_render_samples = 8').replace('>= 340','>= 160')
+          p.write_text(t)
+          PY
+          python3 -m py_compile sanjeevani_r07/*.py
+      - name: Climate
+        env: {SV_OUTPUT: '${{ github.workspace }}/build'}
+        run: python3 sanjeevani_r07/climate_analysis.py > build/climate.log
+      - name: Model and renders
+        env:
+          SV_OUTPUT: ${{ github.workspace }}/build
+          BLENDER_USER_CONFIG: ${{ github.workspace }}/.bcfg
+        run: |
+          tools/blender/blender -b --factory-startup --python sanjeevani_r07/blender_build.py 2>&1 | tee build/blender.log
+          test -s build/Sanjeevani_Vann_LOD300_R07.blend
+          test "$(find build/renders -name '*.png'|wc -l)" -ge 16
+      - name: Contact sheet and film
+        env:
+          SV_OUTPUT: ${{ github.workspace }}/build
+          SV_NARRATION: ${{ github.workspace }}/build/narration.mp3
+          SV_MUSIC: ${{ github.workspace }}/build/music.mp3
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image,ImageDraw,ImageFont
+          fs=sorted(Path('build/renders').glob('*.png'));tw,th=480,270;out=Image.new('RGB',(1920,((len(fs)+3)//4)*312),'#071b15');d=ImageDraw.Draw(out);f=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',15)
+          for i,p in enumerate(fs):
+            im=Image.open(p).convert('RGB');im.thumbnail((tw,th));x=(i%4)*tw;y=(i//4)*312;out.paste(im,(x,y));d.text((x+8,y+276),p.stem,fill='white',font=f)
+          out.save('build/Sanjeevani_Vann_R07_Render_Contact_Sheet.jpg',quality=90)
+          PY
+          python3 sanjeevani_r07/build_film.py > build/film.log
+      - name: Verify package and publish
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          set -e
+          test -s build/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=codec_type,codec_name,width,height,sample_rate,channels -of json build/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4 > build/verify.json
+          D=$(jq -r '.format.duration|tonumber' build/verify.json); awk -v d="$D" 'BEGIN{exit !(d>299&&d<301)}'
+          (cd build && zip -r -9 Sanjeevani_Vann_R07_Renders.zip renders >/dev/null && zip -9 Sanjeevani_Vann_R07_Model.zip Sanjeevani_Vann_LOD300_R07.blend Sanjeevani_Vann_LOD300_R07.glb model_statistics.json >/dev/null && zip -9 Sanjeevani_Vann_R07_Climate.zip Sanjeevani_Vann_Regional_Climate_Analysis_R07.pdf climate_*.png climate_summary.json >/dev/null && zip -r -9 Sanjeevani_Vann_R07_Complete_Package.zip Sanjeevani_Vann_LOD300_R07.blend Sanjeevani_Vann_LOD300_R07.glb model_statistics.json Sanjeevani_Vann_R07_Render_Contact_Sheet.jpg Sanjeevani_Vann_R07_Renders.zip Sanjeevani_Vann_Regional_Climate_Analysis_R07.pdf Sanjeevani_Vann_R07_Climate.zip Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4 Sanjeevani_Vann_R07_5min_Architectural_Film_Web_720p.mp4 film_probe.json verify.json >/dev/null)
+          TAG=sanjeevani-r07-lod300
+          gh release view $TAG >/dev/null 2>&1 && gh release delete $TAG --cleanup-tag -y || true
+          gh release create $TAG --title "Sanjeevani Vann — LOD300 Concept R07" --notes "Coordinated R07 concept model, roads, dual walks, landscape, architecture, climate analysis, renders and five-minute film. Designed by Aeronova Consultants, led by Architect Gaurav Vatsa." build/Sanjeevani_Vann_LOD300_R07.blend build/Sanjeevani_Vann_LOD300_R07.glb build/Sanjeevani_Vann_R07_Model.zip build/Sanjeevani_Vann_R07_Renders.zip build/Sanjeevani_Vann_R07_Render_Contact_Sheet.jpg build/Sanjeevani_Vann_Regional_Climate_Analysis_R07.pdf build/Sanjeevani_Vann_R07_Climate.zip build/Sanjeevani_Vann_R07_5min_Architectural_Film_1080p.mp4 build/Sanjeevani_Vann_R07_5min_Architectural_Film_Web_720p.mp4 build/Sanjeevani_Vann_R07_Complete_Package.zip build/model_statistics.json build/climate_summary.json build/film_probe.json build/verify.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sanjeevani-Vann-R07-Ultra-Package
+          path: build/*
+          compression-level: 0
+          retention-days: 14
