@@ -1,7 +1,7 @@
 name: Build Sanjeevani R07 Ultra
 on:
   push:
-    paths: ['.github/workflows/build-sanjeevani-r07-ultra.yml']
+    paths: ['.github/workflows/build-sanjeevani-r07-ultra.yml', 'sanjeevani_r07/build_film.py']
   workflow_dispatch:
 permissions:
   contents: write
